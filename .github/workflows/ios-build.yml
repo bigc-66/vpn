@@ -1,0 +1,219 @@
+name: iOS Build & Deploy
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Build mode'
+        required: true
+        type: choice
+        default: 'unsigned'
+        options:
+          - unsigned
+          - adhoc
+          - appstore
+
+env:
+  WORKING_DIR: .
+  XCODE_VERSION: '26.5'
+  FLUTTER_VERSION: '3.41.3'
+  SCHEME: Runner
+
+jobs:
+  build:
+    name: Build iOS (${{ inputs.build_mode || 'unsigned' }})
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+
+    steps:
+      # ── Checkout ──
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Select Xcode 26 ──
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: |
+          sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
+          xcodebuild -version
+          SDK_VER=$(xcrun --sdk iphoneos --show-sdk-version)
+          echo "iOS SDK: $SDK_VER"
+          if echo "$SDK_VER" | grep -q "^26"; then
+            echo "[OK] iOS 26 SDK available"
+          else
+            echo "[ERROR] iOS 26 SDK not found - App Store will reject (90725)"
+            exit 1
+          fi
+
+      # ── Setup Flutter ──
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # ── CocoaPods ──
+      - name: Pod install
+        run: |
+          cd ios && pod install && cd ..
+
+      # ── Signing: Import Certificate ──
+      - name: Import Signing Certificate
+        if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security default-keychain -s $KEYCHAIN_PATH
+          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/cert.p12
+          security import $RUNNER_TEMP/cert.p12 -k $KEYCHAIN_PATH -P "$P12_PASSWORD" -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          echo "[OK] Certificate imported"
+
+      # ── Signing: Install Profiles ──
+      - name: Install Provisioning Profiles
+        if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
+        env:
+          APP_PROFILE_BASE64: ${{ secrets.APP_PROFILE_BASE64 }}
+          EXT_PROFILE_BASE64: ${{ secrets.EXT_PROFILE_BASE64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$APP_PROFILE_BASE64" | base64 --decode > $RUNNER_TEMP/app.mobileprovision
+          echo "$EXT_PROFILE_BASE64" | base64 --decode > $RUNNER_TEMP/ext.mobileprovision
+          echo "[OK] Profiles decoded"
+
+      # ── Signing: Configure ──
+      - name: Configure Manual Code Signing
+        if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
+        env:
+          TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          APP_PROFILE_PATH: ${{ runner.temp }}/app.mobileprovision
+          EXT_PROFILE_PATH: ${{ runner.temp }}/ext.mobileprovision
+          EXPORT_METHOD: ${{ inputs.build_mode == 'adhoc' && 'ad-hoc' || 'app-store' }}
+        run: |
+          chmod +x ios/scripts/configure_ci_signing.sh
+          sed -i '' 's/\r$//' ios/scripts/configure_ci_signing.sh
+          bash ios/scripts/configure_ci_signing.sh
+
+      # ── Build IPA ──
+      - name: Build unsigned IPA
+        if: inputs.build_mode == 'unsigned'
+        run: flutter build ipa --release --no-codesign
+
+      - name: Build signed IPA
+        if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
+        run: |
+          flutter build ipa --release \
+            --export-options-plist=ios/ExportOptions.plist \
+            --dart-define=API_BASE_URL=https://api.netsignory.com
+
+      # ── Validate IPA MinimumOSVersion ──
+      - name: Validate MinimumOSVersion
+        if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
+        run: |
+          IPA_PATH=$(find build/ios/ipa -name "*.ipa" | head -1)
+          if [[ -z "$IPA_PATH" ]]; then
+            echo "[ERROR] IPA not found"
+            exit 1
+          fi
+          echo "IPA: $IPA_PATH"
+          TEMP_DIR=$(mktemp -d)
+          unzip -q "$IPA_PATH" -d "$TEMP_DIR"
+          APP_FW_PLIST="$TEMP_DIR/Payload/Runner.app/Frameworks/App.framework/Info.plist"
+          if [[ -f "$APP_FW_PLIST" ]]; then
+            MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP_FW_PLIST" 2>/dev/null || echo "")
+            echo "App.framework MinimumOSVersion: '$MIN_OS'"
+            if [[ -z "$MIN_OS" ]]; then
+              echo "[FIX] Injecting MinimumOSVersion=13.0"
+              /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 13.0" "$APP_FW_PLIST"
+              cd "$TEMP_DIR" && zip -qr "$RUNNER_TEMP/fixed.ipa" . && cd -
+              mv "$RUNNER_TEMP/fixed.ipa" "$IPA_PATH"
+              echo "[OK] IPA repacked"
+            fi
+          fi
+          rm -rf "$TEMP_DIR"
+
+      # ── Upload Artifact ──
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Netsignory-ipa
+          path: build/ios/ipa/*.ipa
+          retention-days: 30
+
+      # ── TestFlight ──
+      - name: Prepare App Store Connect API Key
+        if: inputs.build_mode == 'appstore'
+        id: api_key
+        env:
+          APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+          APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          if [[ -z "${APPSTORE_API_KEY_ID:-}" || -z "${APPSTORE_ISSUER_ID:-}" ]]; then
+            echo "skip_upload=true" >> $GITHUB_OUTPUT
+            echo "[SKIP] API Key/Issuer not configured"
+            exit 0
+          fi
+          mkdir -p $RUNNER_TEMP/appstore_keys
+          KEY_FILE="$RUNNER_TEMP/appstore_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+
+          if [[ -n "${APPSTORE_API_PRIVATE_KEY_BASE64:-}" ]]; then
+            echo "$APPSTORE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$KEY_FILE"
+            echo "[OK] Key decoded from BASE64"
+          elif [[ -n "${APPSTORE_API_PRIVATE_KEY:-}" ]]; then
+            echo "$APPSTORE_API_PRIVATE_KEY" | sed '/^-----/d' | tr -d '\n' > /tmp/temp_key
+            echo "-----BEGIN PRIVATE KEY-----" > "$KEY_FILE"
+            cat /tmp/temp_key >> "$KEY_FILE"
+            echo "" >> "$KEY_FILE"
+            echo "-----END PRIVATE KEY-----" >> "$KEY_FILE"
+            echo "[OK] Key written from text"
+          else
+            echo "skip_upload=true" >> $GITHUB_OUTPUT
+            echo "[SKIP] No API private key configured"
+          fi
+
+      - name: Upload to TestFlight
+        if: inputs.build_mode == 'appstore' && steps.api_key.outputs.skip_upload != 'true'
+        uses: apple-actions/upload-testflight-build@v4
+        with:
+          app-path: build/ios/ipa/*.ipa
+          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+          api-key-id: ${{ secrets.APPSTORE_API_KEY_ID }}
+          api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY || secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
+          wait-for-processing: false
+
+      # ── Cleanup ──
+      - name: Cleanup Keychain
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
+          rm -f $RUNNER_TEMP/cert.p12 $RUNNER_TEMP/app.mobileprovision $RUNNER_TEMP/ext.mobileprovision
+
+      # ── Summary ──
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "==========================================="
+          echo " iOS Build Complete"
+          echo " Mode:   ${{ inputs.build_mode || 'unsigned' }}"
+          echo " Xcode:  ${XCODE_VERSION}"
+          echo " SDK:    $(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "==========================================="
