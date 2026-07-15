@@ -153,7 +153,7 @@ import SystemConfiguration
             return
         }
         do {
-            try manager.connection.sendProviderMessage("stats".data(using: .utf8)!) { data in
+            try (manager.connection as! NETunnelProviderSession).sendProviderMessage("stats".data(using: .utf8)!) { data in
                 if let data = data, let json = try? JSONSerialization.jsonObject(with: data) {
                     result(json)
                 } else {
