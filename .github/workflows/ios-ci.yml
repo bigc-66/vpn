@@ -35,16 +35,12 @@ jobs:
       - name: Build unsigned IPA
         run: |
           flutter build ipa --release --no-codesign
-          echo "=== xcarchive contents ==="
-          ls -la build/ios/archive/Runner.xcarchive/Products/Applications/
-          echo "=== Creating IPA manually ==="
-          mkdir -p build/ios/ipa/Payload
-          cp -R "build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app" build/ios/ipa/Payload/
-          cd build/ios/ipa
-          zip -r "../Netsignory_unsigned.ipa" Payload/
-          cd ../..
-          ls -lh build/ios/Netsignory_unsigned.ipa
+          mkdir -p Payload
+          cp -R build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app Payload/
+          zip -r Netsignory_unsigned.ipa Payload/
+          rm -rf Payload
+          ls -lh Netsignory_unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: Netsignory-ipa
-          path: build/ios/Netsignory_unsigned.ipa
+          path: Netsignory_unsigned.ipa
