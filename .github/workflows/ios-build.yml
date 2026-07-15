@@ -36,6 +36,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Ensure latest commit
+        run: |
+          git fetch origin master
+          git reset --hard origin/master
+          git log --oneline -3
+
 
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
