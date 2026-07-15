@@ -59,6 +59,15 @@ jobs:
 
       - name: Flutter pub get
         run: flutter pub get
+      - name: Debug pbxproj
+        run: |
+          echo "=== pbxproj line count ==="
+          wc -l ios/Runner.xcodeproj/project.pbxproj
+          echo "=== VPNTunnel UUIDs ==="
+          grep -c "D4E5F6A7B8C90000" ios/Runner.xcodeproj/project.pbxproj || echo "none"
+          echo "=== tail ==="
+          tail -5 ios/Runner.xcodeproj/project.pbxproj
+
 
       - name: Pod install
         run: |
