@@ -34,11 +34,11 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
 
     steps:
-      # ── Checkout ──
+      # 鈹€鈹€ Checkout 鈹€鈹€
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Select Xcode 26 ──
+      # 鈹€鈹€ Select Xcode 26 鈹€鈹€
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
@@ -52,7 +52,7 @@ jobs:
             exit 1
           fi
 
-      # ── Setup Flutter ──
+      # 鈹€鈹€ Setup Flutter 鈹€鈹€
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -63,12 +63,18 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      # ── CocoaPods ──
+      # 鈹€鈹€ Add VPNTunnel Extension 鈹€鈹€
+      - name: Add VPNTunnel Extension
+        run: |
+          gem install xcodeproj --no-document
+          ruby ios/scripts/add_vpn_extension.rb
+
+      # 鈹€鈹€ CocoaPods 鈹€鈹€
       - name: Pod install
         run: |
           cd ios && pod install && cd ..
 
-      # ── Signing: Import Certificate ──
+      # 鈹€鈹€ Signing: Import Certificate 鈹€鈹€
       - name: Import Signing Certificate
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -86,7 +92,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           echo "[OK] Certificate imported"
 
-      # ── Signing: Install Profiles ──
+      # 鈹€鈹€ Signing: Install Profiles 鈹€鈹€
       - name: Install Provisioning Profiles
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -98,7 +104,7 @@ jobs:
           echo "$EXT_PROFILE_BASE64" | base64 --decode > $RUNNER_TEMP/ext.mobileprovision
           echo "[OK] Profiles decoded"
 
-      # ── Signing: Configure ──
+      # 鈹€鈹€ Signing: Configure 鈹€鈹€
       - name: Configure Manual Code Signing
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -111,7 +117,7 @@ jobs:
           sed -i '' 's/\r$//' ios/scripts/configure_ci_signing.sh
           bash ios/scripts/configure_ci_signing.sh
 
-      # ── Build IPA ──
+      # 鈹€鈹€ Build IPA 鈹€鈹€
       - name: Build unsigned IPA
         if: inputs.build_mode == 'unsigned'
         run: flutter build ipa --release --no-codesign
@@ -123,7 +129,7 @@ jobs:
             --export-options-plist=ios/ExportOptions.plist \
             --dart-define=API_BASE_URL=https://api.netsignory.com
 
-      # ── Validate IPA MinimumOSVersion ──
+      # 鈹€鈹€ Validate IPA MinimumOSVersion 鈹€鈹€
       - name: Validate MinimumOSVersion
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         run: |
@@ -149,7 +155,7 @@ jobs:
           fi
           rm -rf "$TEMP_DIR"
 
-      # ── Upload Artifact ──
+      # 鈹€鈹€ Upload Artifact 鈹€鈹€
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -157,7 +163,7 @@ jobs:
           path: build/ios/ipa/*.ipa
           retention-days: 30
 
-      # ── TestFlight ──
+      # 鈹€鈹€ TestFlight 鈹€鈹€
       - name: Prepare App Store Connect API Key
         if: inputs.build_mode == 'appstore'
         id: api_key
@@ -200,14 +206,14 @@ jobs:
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY || secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
           wait-for-processing: false
 
-      # ── Cleanup ──
+      # 鈹€鈹€ Cleanup 鈹€鈹€
       - name: Cleanup Keychain
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
           rm -f $RUNNER_TEMP/cert.p12 $RUNNER_TEMP/app.mobileprovision $RUNNER_TEMP/ext.mobileprovision
 
-      # ── Summary ──
+      # 鈹€鈹€ Summary 鈹€鈹€
       - name: Build Summary
         if: always()
         run: |
