@@ -32,14 +32,19 @@ jobs:
       - run: flutter pub get
       - name: Pod install
         run: cd ios && rm -rf Pods Podfile.lock && pod deintegrate 2>/dev/null || true && pod install --repo-update && cd ..
-      - name: Build IPA
+      - name: Build unsigned IPA
         run: |
           flutter build ipa --release --no-codesign
-          mkdir -p build/ios/ipa
-          /usr/libexec/PlistBuddy -c "Add :method string development" /tmp/e.plist
-          xcodebuild -exportArchive -archivePath build/ios/archive/Runner.xcarchive -exportPath build/ios/ipa -exportOptionsPlist /tmp/e.plist -allowProvisioningUpdates 2>/dev/null || true
-          ls -la build/ios/ipa/
+          echo "=== xcarchive contents ==="
+          ls -la build/ios/archive/Runner.xcarchive/Products/Applications/
+          echo "=== Creating IPA manually ==="
+          mkdir -p build/ios/ipa/Payload
+          cp -R "build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app" build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -r "../Netsignory_unsigned.ipa" Payload/
+          cd ../..
+          ls -lh build/ios/Netsignory_unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: Netsignory-ipa
-          path: build/ios/ipa/*.ipa
+          path: build/ios/Netsignory_unsigned.ipa
