@@ -34,11 +34,9 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
 
     steps:
-      # 鈹€鈹€ Checkout 鈹€鈹€
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 鈹€鈹€ Select Xcode 26 鈹€鈹€
       - name: Select Xcode ${{ env.XCODE_VERSION }}
         run: |
           sudo xcode-select -s "/Applications/Xcode_${XCODE_VERSION}.app"
@@ -52,7 +50,6 @@ jobs:
             exit 1
           fi
 
-      # 鈹€鈹€ Setup Flutter 鈹€鈹€
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -63,18 +60,10 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
-      # 鈹€鈹€ Add VPNTunnel Extension 鈹€鈹€
-      - name: Add VPNTunnel Extension
-        run: |
-          gem install xcodeproj --no-document
-          ruby ios/scripts/add_vpn_extension.rb
-
-      # 鈹€鈹€ CocoaPods 鈹€鈹€
       - name: Pod install
         run: |
           cd ios && pod install && cd ..
 
-      # 鈹€鈹€ Signing: Import Certificate 鈹€鈹€
       - name: Import Signing Certificate
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -92,7 +81,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           echo "[OK] Certificate imported"
 
-      # 鈹€鈹€ Signing: Install Profiles 鈹€鈹€
       - name: Install Provisioning Profiles
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -104,7 +92,6 @@ jobs:
           echo "$EXT_PROFILE_BASE64" | base64 --decode > $RUNNER_TEMP/ext.mobileprovision
           echo "[OK] Profiles decoded"
 
-      # 鈹€鈹€ Signing: Configure 鈹€鈹€
       - name: Configure Manual Code Signing
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         env:
@@ -117,7 +104,6 @@ jobs:
           sed -i '' 's/\r$//' ios/scripts/configure_ci_signing.sh
           bash ios/scripts/configure_ci_signing.sh
 
-      # 鈹€鈹€ Build IPA 鈹€鈹€
       - name: Build unsigned IPA
         if: inputs.build_mode == 'unsigned'
         run: flutter build ipa --release --no-codesign
@@ -129,33 +115,24 @@ jobs:
             --export-options-plist=ios/ExportOptions.plist \
             --dart-define=API_BASE_URL=https://api.netsignory.com
 
-      # 鈹€鈹€ Validate IPA MinimumOSVersion 鈹€鈹€
       - name: Validate MinimumOSVersion
         if: inputs.build_mode == 'appstore' || inputs.build_mode == 'adhoc'
         run: |
           IPA_PATH=$(find build/ios/ipa -name "*.ipa" | head -1)
-          if [[ -z "$IPA_PATH" ]]; then
-            echo "[ERROR] IPA not found"
-            exit 1
-          fi
-          echo "IPA: $IPA_PATH"
-          TEMP_DIR=$(mktemp -d)
-          unzip -q "$IPA_PATH" -d "$TEMP_DIR"
+          if [[ -z "$IPA_PATH" ]]; then echo "[ERROR] IPA not found"; exit 1; fi
+          TEMP_DIR=$(mktemp -d); unzip -q "$IPA_PATH" -d "$TEMP_DIR"
           APP_FW_PLIST="$TEMP_DIR/Payload/Runner.app/Frameworks/App.framework/Info.plist"
           if [[ -f "$APP_FW_PLIST" ]]; then
             MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$APP_FW_PLIST" 2>/dev/null || echo "")
-            echo "App.framework MinimumOSVersion: '$MIN_OS'"
             if [[ -z "$MIN_OS" ]]; then
               echo "[FIX] Injecting MinimumOSVersion=13.0"
               /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 13.0" "$APP_FW_PLIST"
               cd "$TEMP_DIR" && zip -qr "$RUNNER_TEMP/fixed.ipa" . && cd -
               mv "$RUNNER_TEMP/fixed.ipa" "$IPA_PATH"
-              echo "[OK] IPA repacked"
             fi
           fi
           rm -rf "$TEMP_DIR"
 
-      # 鈹€鈹€ Upload Artifact 鈹€鈹€
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
@@ -163,7 +140,6 @@ jobs:
           path: build/ios/ipa/*.ipa
           retention-days: 30
 
-      # 鈹€鈹€ TestFlight 鈹€鈹€
       - name: Prepare App Store Connect API Key
         if: inputs.build_mode == 'appstore'
         id: api_key
@@ -174,26 +150,19 @@ jobs:
           APPSTORE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
         run: |
           if [[ -z "${APPSTORE_API_KEY_ID:-}" || -z "${APPSTORE_ISSUER_ID:-}" ]]; then
-            echo "skip_upload=true" >> $GITHUB_OUTPUT
-            echo "[SKIP] API Key/Issuer not configured"
-            exit 0
+            echo "skip_upload=true" >> $GITHUB_OUTPUT; exit 0
           fi
           mkdir -p $RUNNER_TEMP/appstore_keys
           KEY_FILE="$RUNNER_TEMP/appstore_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
-
           if [[ -n "${APPSTORE_API_PRIVATE_KEY_BASE64:-}" ]]; then
             echo "$APPSTORE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$KEY_FILE"
-            echo "[OK] Key decoded from BASE64"
           elif [[ -n "${APPSTORE_API_PRIVATE_KEY:-}" ]]; then
             echo "$APPSTORE_API_PRIVATE_KEY" | sed '/^-----/d' | tr -d '\n' > /tmp/temp_key
             echo "-----BEGIN PRIVATE KEY-----" > "$KEY_FILE"
-            cat /tmp/temp_key >> "$KEY_FILE"
-            echo "" >> "$KEY_FILE"
+            cat /tmp/temp_key >> "$KEY_FILE"; echo "" >> "$KEY_FILE"
             echo "-----END PRIVATE KEY-----" >> "$KEY_FILE"
-            echo "[OK] Key written from text"
           else
             echo "skip_upload=true" >> $GITHUB_OUTPUT
-            echo "[SKIP] No API private key configured"
           fi
 
       - name: Upload to TestFlight
@@ -206,14 +175,12 @@ jobs:
           api-private-key: ${{ secrets.APPSTORE_API_PRIVATE_KEY || secrets.APPSTORE_API_PRIVATE_KEY_BASE64 }}
           wait-for-processing: false
 
-      # 鈹€鈹€ Cleanup 鈹€鈹€
       - name: Cleanup Keychain
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db 2>/dev/null || true
           rm -f $RUNNER_TEMP/cert.p12 $RUNNER_TEMP/app.mobileprovision $RUNNER_TEMP/ext.mobileprovision
 
-      # 鈹€鈹€ Summary 鈹€鈹€
       - name: Build Summary
         if: always()
         run: |
