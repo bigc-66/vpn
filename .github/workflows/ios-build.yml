@@ -1,0 +1,64 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Build mode'
+        required: true
+        type: choice
+        default: 'unsigned'
+        options:
+          - unsigned
+          - adhoc
+          - appstore
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Force latest master
+        run: |
+          git fetch origin master
+          git reset --hard origin/master
+          echo "=== Commit ==="
+          git log --oneline -3
+          echo "=== pbxproj VPNTunnel UUIDs ==="
+          grep -c "D4E5F6" ios/Runner.xcodeproj/project.pbxproj || echo "CLEAN"
+          echo "=== Podfile VPNTunnel ==="
+          grep -c "VPNTunnel" ios/Podfile || echo "CLEAN"
+
+      - name: Select Xcode 26.5
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.5.app
+          xcodebuild -version
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.3'
+          channel: stable
+
+      - run: flutter pub get
+
+      - name: Pod install
+        run: |
+          cd ios
+          rm -rf Pods Podfile.lock
+          pod deintegrate 2>/dev/null || true
+          pod install --repo-update
+          cd ..
+
+      - name: Build unsigned IPA
+        if: inputs.build_mode == 'unsigned'
+        run: flutter build ipa --release --no-codesign
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.build_mode == 'unsigned'
+        with:
+          name: Netsignory-ipa
+          path: build/ios/ipa/*.ipa
