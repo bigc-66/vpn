@@ -36,7 +36,7 @@ jobs:
         run: |
           flutter build ipa --release --no-codesign
           mkdir -p build/ios/ipa
-          echo '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>method</key><string>development</string></dict></plist>' > /tmp/e.plist
+          /usr/libexec/PlistBuddy -c 'Add :method string development' /tmp/e.plist 2>/dev/null; /usr/libexec/PlistBuddy -c 'Add :method string development' /tmp/e.plist version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>method</key><string>development</string></dict>
           xcodebuild -exportArchive -archivePath build/ios/archive/Runner.xcarchive -exportPath build/ios/ipa -exportOptionsPlist /tmp/e.plist -allowProvisioningUpdates 2>/dev/null || true
           ls -la build/ios/ipa/
       - uses: actions/upload-artifact@v4
