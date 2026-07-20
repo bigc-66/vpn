@@ -16,6 +16,7 @@ import SystemConfiguration
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        // 浼犵粺 Flutter 鎻掍欢娉ㄥ唽锛圴PN 搴旂敤涓嶄娇鐢?ImplicitEngine锛?
         GeneratedPluginRegistrant.register(with: self)
 
         guard let controller = window?.rootViewController as? FlutterViewController else {
@@ -24,17 +25,17 @@ import SystemConfiguration
 
         let messenger = controller.binaryMessenger
 
-        // MethodChannel
+        // MethodChannel 鈥?鎺ユ敹 Flutter 鐨?VPN 鎸囦护
         let method = FlutterMethodChannel(name: vpnMethodChannel, binaryMessenger: messenger)
         method.setMethodCallHandler { [weak self] call, result in
             self?.handleMethodCall(call, result: result)
         }
 
-        // EventChannel
+        // EventChannel 鈥?鍚?Flutter 鎺ㄩ€?VPN 鐘舵€佸彉鍖?
         let event = FlutterEventChannel(name: vpnEventChannel, binaryMessenger: messenger)
         event.setStreamHandler(VpnStatusStreamHandler(appDelegate: self))
 
-        // VPN status observer
+        // 鐩戝惉绯荤粺 VPN 鐘舵€佸彉鍖?
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(vpnStatusDidChange(_:)),
@@ -46,7 +47,7 @@ import SystemConfiguration
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
-    // MARK: - VPN Manager
+    // MARK: - VPN Manager 绠＄悊
 
     private func loadVpnManager() {
         NETunnelProviderManager.loadAllFromPreferences { [weak self] managers, error in
@@ -62,9 +63,10 @@ import SystemConfiguration
             return
         }
         let manager = NETunnelProviderManager()
-        manager.localizedDescription = "Unify Flow VPN"
+        manager.localizedDescription = "Netsignory VPN"
         let proto = NETunnelProviderProtocol()
-        proto.providerBundleIdentifier = Bundle.main.bundleIdentifier.map { $0 + ".VPNTunnel" }
+        // 鎵╁睍 Bundle ID = 涓诲簲鐢?Bundle ID + ".VPNTunnel"
+        proto.providerBundleIdentifier = (Bundle.main.bundleIdentifier ?? "com.netsignory.app") + ".VPNTunnel"
         proto.serverAddress = "vpn.server"
         manager.protocolConfiguration = proto
         manager.isEnabled = true
@@ -78,7 +80,7 @@ import SystemConfiguration
         }
     }
 
-    // MARK: - Method Call Handler
+    // MARK: - MethodChannel 鎸囦护鍒嗗彂
 
     private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
@@ -112,7 +114,7 @@ import SystemConfiguration
         }
     }
 
-    // MARK: - Connect
+    // MARK: - 杩炴帴
 
     private func handleConnect(args: [String: Any], result: @escaping FlutterResult) {
         ensureVpnManager { manager in
@@ -137,7 +139,7 @@ import SystemConfiguration
         }
     }
 
-    // MARK: - Disconnect
+    // MARK: - 鏂紑
 
     private func handleDisconnect(result: @escaping FlutterResult) {
         vpnManager?.connection.stopVPNTunnel()
@@ -145,15 +147,16 @@ import SystemConfiguration
         result("disconnected")
     }
 
-    // MARK: - Tunnel Stats
+    // MARK: - 闅ч亾缁熻锛圛PC 閫氫俊锛?
 
     private func handleGetTunnelStats(result: @escaping FlutterResult) {
-        guard let manager = vpnManager else {
+        guard let manager = vpnManager,
+              let session = manager.connection as? NETunnelProviderSession else {
             result(nil)
             return
         }
         do {
-            try (manager.connection as! NETunnelProviderSession).sendProviderMessage("stats".data(using: .utf8)!) { data in
+            try session.sendProviderMessage("stats".data(using: .utf8)!) { data in
                 if let data = data, let json = try? JSONSerialization.jsonObject(with: data) {
                     result(json)
                 } else {
@@ -165,13 +168,13 @@ import SystemConfiguration
         }
     }
 
-    // MARK: - Ping Gateway
+    // MARK: - Ping 缃戝叧
 
     private func pingGateway(ip: String, result: @escaping FlutterResult) {
         result(isHostReachable(ip))
     }
 
-    // MARK: - Generate Key Pair
+    // MARK: - 鐢熸垚 WireGuard 瀵嗛挜瀵?
 
     private func handleGenerateKeyPair(result: @escaping FlutterResult) {
         let privateKey = SecKeyCreateRandomKey([
@@ -188,7 +191,7 @@ import SystemConfiguration
         result(["publicKey": pubData.base64EncodedString()])
     }
 
-    // MARK: - VPN Status Observer
+    // MARK: - VPN 鐘舵€佺洃鍚?
 
     @objc private func vpnStatusDidChange(_ notification: Notification) {
         guard let connection = notification.object as? NEVPNConnection else { return }
@@ -196,7 +199,7 @@ import SystemConfiguration
         statusSink?(status)
     }
 
-    // MARK: - Reachability
+    // MARK: - 缃戠粶鍙揪鎬ф娴?
 
     private func isHostReachable(_ host: String) -> Bool {
         guard let ref = SCNetworkReachabilityCreateWithName(nil, host) else { return false }
