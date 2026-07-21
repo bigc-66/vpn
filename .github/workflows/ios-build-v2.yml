@@ -30,15 +30,10 @@ jobs:
           flutter-version: 3.41.3
           channel: stable
       - run: flutter pub get
-      - name: Fix pbxproj
+      - name: Deploy clean pbxproj
         run: |
-          PBX="ios/Runner.xcodeproj/project.pbxproj"
-          BEFORE=$(wc -l < "$PBX" | tr -d ' ')
-          echo "Lines before: $BEFORE"
-          # Remove stray }; that appears right before rootObject
-          sed -i '' -e '/^[[:space:]]*};$/{ N; /rootObject/{ s/^.*\n//; }; }' "$PBX"
-          AFTER=$(wc -l < "$PBX" | tr -d ' ')
-          echo "Lines after: $AFTER"
+          base64 -d ios/scripts/pbxproj_gz.b64 | gunzip > ios/Runner.xcodeproj/project.pbxproj
+          wc -l ios/Runner.xcodeproj/project.pbxproj
       - name: Pod install
         run: cd ios && rm -rf Pods Podfile.lock && pod install --repo-update && cd ..
       - name: Build unsigned IPA
