@@ -23,33 +23,24 @@ jobs:
           fetch-depth: 0
       - name: Force latest
         run: git fetch origin master && git reset --hard origin/master && git log --oneline -3
-
       - name: Xcode 26.5
         run: sudo xcode-select -s /Applications/Xcode_26.5.app && xcodebuild -version
-
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.41.3
           channel: stable
       - run: flutter pub get
-
-      - name: Fix corrupted pbxproj
+      - name: Fix pbxproj
         run: |
           PBX="ios/Runner.xcodeproj/project.pbxproj"
-          LINES=$(wc -l < "$PBX" | tr -d ' ')
-          echo "pbxproj has $LINES lines"
-          if [ "$LINES" -gt 1000 ]; then
-            echo "Detected corruption, fixing..."
-            END=$(grep -n "rootObject" "$PBX" | head -1 | cut -d: -f1)
-            head -n $END "$PBX" > /tmp/pbx_fixed
-            echo "}" >> /tmp/pbx_fixed
-            mv /tmp/pbx_fixed "$PBX"
-            echo "Fixed: $(wc -l < "$PBX" | tr -d ' ') lines"
-          fi
-
+          BEFORE=$(wc -l < "$PBX" | tr -d ' ')
+          echo "Lines before: $BEFORE"
+          # Remove stray }; that appears right before rootObject
+          sed -i '' -e '/^[[:space:]]*};$/{ N; /rootObject/{ s/^.*\n//; }; }' "$PBX"
+          AFTER=$(wc -l < "$PBX" | tr -d ' ')
+          echo "Lines after: $AFTER"
       - name: Pod install
         run: cd ios && rm -rf Pods Podfile.lock && pod install --repo-update && cd ..
-
       - name: Build unsigned IPA
         run: |
           flutter build ipa --release --no-codesign
@@ -58,7 +49,6 @@ jobs:
           zip -r Netsignory_unsigned.ipa Payload/
           rm -rf Payload
           ls -lh Netsignory_unsigned.ipa
-
       - uses: actions/upload-artifact@v4
         with:
           name: Netsignory-ipa
